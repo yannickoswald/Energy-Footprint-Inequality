@@ -1,0 +1,119 @@
+%%
+load('Y_h.mat');
+load('IDs_all_countries_Eurostat.mat');
+load('spends_total_countries_EUROSTAT_COICOP.mat');
+load('spends_total_countries_EUROSTAT_GTAP_TOTAL.mat');
+load('spends_total_countries_EUROSTAT_GTAP.mat');
+load('energy_footprint_product_EUROSTAT_countries.mat');
+load('L.mat');
+load('e.mat');
+load('energy_direct_residential.mat');
+load('energy_direct_road.mat');
+load('energy_footprint_countries_per_segment_EUROSTAT.mat');
+load('population_EUROSTAT.mat');
+load('Y_h_income_segments_EUROSTAT_countries.mat');
+C2 = xlsread(['GTAP_COICOP_GCDversion.xlsx'],['Level2'],'D7:AR63');
+lookup_agg = xlsread(['syn_exp5.xlsx'],['lookupcoicopagg'],'C3:AQ16');
+consumption_countries_EUROSTAT_COICOP = xlsread(['syn_exp5.xlsx'],['non_harmonized_GTAP_prep_4'],'J2300:N3529');
+ID_order = xlsread(['energy intensity and elasticity data.xlsx'],['energy intensity es'],'B3:B32');
+
+%%
+%%%% Read Full Spends of all countries coming from the EUROSTAT first %%%
+
+spends_total_countries_EUROSTAT_COICOP = sum(xlsread(['syn_exp5.xlsx'],['non_harmonized_GTAP_prep_4'],'J2300:N3529'),2);
+save('spends_total_countries_EUROSTAT_COICOP.mat','spends_total_countries_EUROSTAT_COICOP');
+
+load('Y_h.mat');
+for c = IDs_all_countries_Eurostat
+    spends_total_countries_EUROSTAT_GTAP_TOTAL = sum(Y_h(:,c))*1E06; %%%% TIMES A MILLION CAUSE IN GTAP IS IN MILLION USD BUT IN OUR COICOP SPENDS IS $ only 
+end
+
+save('spends_total_countries_EUROSTAT_GTAP_TOTAL.mat','spends_total_countries_EUROSTAT_GTAP_TOTAL');
+
+for c = IDs_all_countries_Eurostat
+   for i = 1:57
+      spends_total_countries_EUROSTAT_GTAP(i,:) = sum(Y_h(i:57:end,c))*1E06; %%%% TIMES A MILLION CAUSE IN GTAP IS IN MILLION USD BUT IN OUR COICOP SPENDS IS $ only 
+    end
+end
+save('spends_total_countries_EUROSTAT_GTAP.mat','spends_total_countries_EUROSTAT_GTAP');
+%%% CALCULATE ADJUSTED EUROSTAT SPENDS 
+
+for i = 1:30 
+    spends_total_countries_EUROSTAT_COICOP_TOTAL(i) = sum(spends_total_countries_EUROSTAT_COICOP(i*41-40:41*i,:));
+    scaling_factor(i) = spends_total_countries_EUROSTAT_GTAP_TOTAL(i)/spends_total_countries_EUROSTAT_COICOP_TOTAL(i); %%%% NOW RE-SCALE COICOP TO THE SIZE OCCURING IN GTAP SO TOTAL SPENDS EQUAL EACH OTHER COMPUTE SCALING FACTOR FOR THIS
+    spends_total_countries_EUROSTAT_COICOP_ADJUSTED(i*41-40:41*i,:) = spends_total_countries_EUROSTAT_COICOP(i*41-40:41*i,:).*scaling_factor(i);
+end 
+
+spends_total_countries_EUROSTAT_COICOP_ADJUSTED(spends_total_countries_EUROSTAT_COICOP_ADJUSTED==0) = 0.000001; %%% THE CONSTRAINTS IN THE IPF (Iterative Proportional Fitting) should not be zero. 
+save('spends_total_countries_EUROSTAT_COICOP_ADJUSTED.mat','spends_total_countries_EUROSTAT_COICOP_ADJUSTED');
+
+%%% LOAD C0 %%% 
+
+for i = 1:41
+    for j = 1:57 
+        C2_prop(j,i) = C2(j,i)./sum(C2(:,i));
+    end 
+end 
+C0 = C2_prop;
+
+%%
+for i = 1:30
+    
+   %%% DO THE RAS 
+    
+   true_column_sum = spends_total_countries_EUROSTAT_COICOP_ADJUSTED(i*41-40:i*41,:);
+   true_row_sum = spends_total_countries_EUROSTAT_GTAP(:,i);
+   true_column_sum(true_column_sum<=0) = 0.000000001;
+   true_row_sum(true_row_sum<=0) = 0.000000001;
+   
+   for k = 1:57 
+      C1(k,:) =  C0(k,:).* true_column_sum';
+   end 
+
+    for c = 1:500   
+        colsumnow = sum(C1,1);
+        colsumnow(colsumnow<=0)=0.000000001;
+        for c = 1:57
+            C1(c,1:41) = C1(c,1:41)./colsumnow.*true_column_sum';
+        end
+        rowsumnow = sum(C1,2);
+        rowsumnow(rowsumnow<=0)=0.000000001;   
+        for c = 1:41
+            C1(1:57,c) = C1(1:57,c)./rowsumnow.*true_row_sum;
+        end    
+    end
+    Ybalanced = C1;
+    
+    %%% NOW COMPUTE FOOTPRINTS PER PRODUCT PER COUNTRY 
+    
+    %%%get the currents country Y_h proportions 
+    hh_spends = Y_h(:,IDs_all_countries_Eurostat(i));
+    
+    for j = 1:140
+        for r = 1:57
+            hh_spends_proportions(57*j-(57-r),:) = hh_spends(57*j-(57-r),:)./sum(hh_spends(r:57:end)); %%% index in such a way that you can compute the corresponding proportions for each sector in each country. we need global volume of sector and volume per country and each sector.
+        end  
+    end 
+    
+    %%% STRETCH The Ybalanced matrix so you can compute footprints per
+    %%% product 
+    
+    for a = 1:41 
+        for j = 1:140
+              Yextended(j*57-56:j*57,a) = hh_spends_proportions(j*57-56:j*57,:).* Ybalanced(:,a);
+        end 
+    end 
+    
+  footprintmatrix = diag(e)*L*(Yextended);
+  footprint_product_COICOP_data(i,:) = sum(footprintmatrix,1);
+  footprint_product_COICOP_data_agg(i,:) = sum(footprintmatrix,1)*lookup_agg';
+  
+  %%% footprints are already in Megajoule because production based energy
+  %%% intensities are in MJ/$ too 
+  
+  %%% Make fourteen aggregate version of footprints and intensities which
+  %%% is based on intensities on level 2  
+  %footprint_product_COICOP_data_agg(i,:) = footprint_product_COICOP_data(i,:)*lookup_agg'; %%% here the lookup has to be applied so that 1x41 * 41x14
+  
+   spends_balanced_country_i(i,:) = sum(Ybalanced);
+end
