@@ -1,0 +1,119 @@
+function  [a,b,r, se_a, se_b, resid] = line_fit_weighted_resid(varargin)
+%function [a,b,r, se_a, se_b, resid] = line_fit_weighted_resid(varargin)
+% varargin is x, y, w where the weight vector is optional (ones are
+% default)
+% resvec = [a,b,r, se_a, se_b]
+% weighted least squares fit y = a + b*x
+% r = correlation coefficient (so r^2 is goodness of fit)
+% se_a and se_b standard errors
+% w are weights
+% http://mathworld.wolfram.com/LeastSquaresFitting.html
+% http://www.itl.nist.gov/div898/handbook/pmd/section4/pmd432.htm
+% http://en.wikipedia.org/wiki/Weighted_least_squares
+% http://jchemed.chem.wisc.edu/JCEDLib/SymMath/collection/012/LinearLeastSquares.pdf
+% 
+
+if length(varargin)< 2
+    error('line_fit_weighted: need at least x, y as inputs');
+end
+if length(varargin)== 2
+xs = varargin{1}; ys = varargin{2};
+    xs = reshape(xs,length(xs),1);
+ys = reshape(ys,length(ys),1);
+iuse =(isnan(xs)~=1) & (isnan(ys)~=1);
+x = xs(iuse); y = ys(iuse);
+w=0*x +1;
+else
+    xs = varargin{1}; ys = varargin{2}; ws = varargin{3};
+    xs = reshape(xs,length(xs),1);
+    ys = reshape(ys,length(ys),1);
+    ws = reshape(ws,length(ws),1);
+    iuse =(isnan(xs)~=1) & (isnan(ys)~=1) & (isnan(ws)~=1);
+    x = xs(iuse); y = ys(iuse); w = ws(iuse);
+end
+
+
+if (length(x)~= length(y)) |(length(x)~= length(w))
+    error('dont be silly! x, y and w should be same length');
+
+elseif (length(x)<=2)
+    error('dont be silly! x, y and w should be longer than 2');
+end
+%x = reshape(x,length(x),1);
+%y = reshape(y,length(y),1);
+%w = reshape(w,length(w),1);
+n = length(x);
+    mx = mean(x);
+    my = mean(y);
+    mw = mean(w);
+xmat = ones(n,2);
+xmat(:,2) = x;
+xmatT = transpose(xmat);
+% vmat is matrix with all zeros except diagonal is 1/weight
+vmat=zeros(n,n);
+for i=1:n; vmat(i,i)=1/w(i); end;
+resmat=inv(xmatT*inv(vmat)*xmat)*xmatT*inv(vmat)*y;
+a=resmat(1);
+b=resmat(2);
+ss_e_w = sum((y -a -b*x).^2.*w);
+ss_yy_w = sum((y-my).^2.*w);
+ss_xx_w = sum((x-mx).^2.*w);
+ss_xy_w = sum((x-mx).*(y-my).*w);
+r_w = sqrt((ss_yy_w-ss_e_w)/ss_yy_w);
+r=r_w;
+sigma2 = ss_e_w/(n-2);
+seab = (sigma2*inv(xmatT*inv(vmat)*xmat)).^.5;
+se_a = seab(1,1);
+se_b = seab(2,2);
+
+resvec = [a,b,r,se_a,se_b];
+    ss_xx = sum((x-mx).^2);
+    ss_yy = sum((y-my).^2);
+    ss_xy = sum((x-mx).*(y-my));
+    %b=ss_xy/ss_xx;
+    %a = my - b*mx;
+    r = sqrt(ss_xy^2/(ss_xx*ss_yy));
+    %r^2
+
+plotflag=0;
+if plotflag==1
+    tdist = 0.678;
+   confint = xmat*resmat;
+    size(confint)
+    size(inv(xmatT*inv(vmat)*xmat))
+    for i=1:n
+   confint(i)= +tdist * sqrt(sigma2*(xmat(i,:)*inv(xmatT*inv(vmat)*xmat)*xmatT(:,i)));
+    end
+   yfit = xmat*resmat;
+    size(confint)
+    hold off
+       plot(xmat(:,2),yfit,'r-'); hold on;
+   plot(xmat(:,2),yfit+confint);
+   hold on
+   plot(xmat(:,2),yfit-confint);
+   %plot(xmat(:,2),yfit,'r');
+   
+   
+end
+test =1;
+%tests non-weighted case
+if test ==0
+
+    ss_xx = sum((x-mx).^2);
+    ss_yy = sum((y-my).^2);
+    ss_xy = sum((x-mx).*(y-my));
+    b=ss_xy/ss_xx;
+    a = my - b*mx;
+    r = sqrt(ss_xy^2/(ss_xx*ss_yy));
+    y_fit = a+b*x;
+    e = y-y_fit;
+    s = sqrt((ss_yy - ss_xy^2/ss_xx)/(n-2));
+    se_a = s*sqrt(1/n+mx^2/ss_xx);
+    se_b = s/sqrt(ss_xx);
+    ss_e = sum((y -a -b*x).^2);
+    mse = ss_e/(n-2);
+    sdmat = (mse*inv(xmatT*xmat)).^.5;
+    sda = sdmat(1,1)
+    sdb = sdmat(2,2)
+    resnow = [a,b,r,se_a,se_b]
+end
